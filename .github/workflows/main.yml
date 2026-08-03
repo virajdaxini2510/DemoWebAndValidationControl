@@ -14,7 +14,7 @@ env:
   WEBSITE_PATH: C:\MyWebApp
 
 ############################################################
-# Stage 1
+# Stage 1 : Build & Publish
 ############################################################
 
 jobs:
@@ -37,50 +37,100 @@ jobs:
       uses: NuGet/setup-nuget@v2
 
     - name: Restore NuGet Packages
-      run: nuget restore "${{ env.SOLUTION }}"
+      run: nuget restore ${{ env.SOLUTION }}
 
-    - name: Build and Publish Website
+    - name: Build Solution
+      shell: powershell
+      run: |
+        msbuild "${{ env.SOLUTION }}" `
+          /p:Configuration=${{ env.CONFIGURATION }}
+
+    - name: Verify Build Output
+      shell: powershell
+      run: |
+        if (!(Test-Path "bin")) {
+          throw "Build failed. bin folder not found."
+        }
+
+        Write-Host "===== BUILD OUTPUT ====="
+        Get-ChildItem bin
+
+    - name: Create Deployment Folder
       shell: powershell
       run: |
 
-        msbuild "${{ env.SOLUTION }}" `
-          /p:Configuration=${{ env.CONFIGURATION }} `
-          /p:DeployOnBuild=true `
-          /p:WebPublishMethod=FileSystem `
-          /p:DeleteExistingFiles=true `
-          /p:publishUrl="${{ github.workspace }}\Published"
+        $publish = "${{ github.workspace }}\Published"
+
+        if(Test-Path $publish)
+        {
+            Remove-Item $publish -Recurse -Force
+        }
+
+        New-Item -ItemType Directory -Path $publish | Out-Null
+
+    - name: Copy Website Files
+      shell: powershell
+      run: |
+
+        $publish="${{ github.workspace }}\Published"
+
+        # Copy all root files
+        Get-ChildItem -File | Copy-Item -Destination $publish -Force
+
+        # Copy common ASP.NET folders if they exist
+        $folders=@(
+            "bin",
+            "App_Data",
+            "App_Themes",
+            "Scripts",
+            "Content",
+            "Images",
+            "Image",
+            "Css",
+            "css",
+            "Js",
+            "js",
+            "fonts",
+            "Fonts",
+            "Uploads"
+        )
+
+        foreach($folder in $folders)
+        {
+            if(Test-Path $folder)
+            {
+                Copy-Item $folder $publish -Recurse -Force
+            }
+        }
 
     - name: Display Published Files
       shell: powershell
       run: |
-
-        Write-Host "Published Website"
-
-        Get-ChildItem `
-            "${{ github.workspace }}\Published" `
-            -Recurse
+        Write-Host "===== PUBLISHED WEBSITE ====="
+        Get-ChildItem Published -Recurse
 
     - name: Upload Website Artifact
       uses: actions/upload-artifact@v4
       with:
         name: Website
         path: Published
+        if-no-files-found: error
 
 ############################################################
-# Stage 2
+# Stage 2 : Verify & Download Artifact
 ############################################################
 
-  Artifact:
+  Verify:
 
-    name: Stage 2 - Verify Artifact
-
-    runs-on: windows-latest
+    name: Stage 2 - Verify & Download Artifact
 
     needs: Build
 
+    runs-on: windows-latest
+
     steps:
 
-    - name: Download Artifact
+    - name: Download Website Artifact
       uses: actions/download-artifact@v4
       with:
         name: Website
@@ -90,21 +140,26 @@ jobs:
       shell: powershell
       run: |
 
-        Write-Host "Artifact Downloaded Successfully"
+        if (!(Test-Path "Website"))
+        {
+            throw "Artifact download failed."
+        }
+
+        Write-Host "===== ARTIFACT CONTENT ====="
 
         Get-ChildItem Website -Recurse
 
 ############################################################
-# Stage 3
+# Stage 3 : Deploy to IIS
 ############################################################
 
   Deploy:
 
     name: Stage 3 - Deploy to IIS
 
-    runs-on: self-hosted
+    needs: Verify
 
-    needs: Artifact
+    runs-on: self-hosted
 
     steps:
 
@@ -123,38 +178,29 @@ jobs:
         if(Get-Website -Name "${env:WEBSITE_NAME}" -ErrorAction SilentlyContinue)
         {
             Stop-WebSite -Name "${env:WEBSITE_NAME}"
-
-            Write-Host "Website Stopped"
+            Write-Host "Website stopped."
         }
 
-    - name: Clean Existing Website
+    - name: Clean IIS Folder
       shell: powershell
       run: |
 
         if(Test-Path "${env:WEBSITE_PATH}")
         {
-            Remove-Item `
-                "${env:WEBSITE_PATH}\*" `
-                -Recurse `
-                -Force
+            Remove-Item "${env:WEBSITE_PATH}\*" -Recurse -Force
         }
         else
         {
-            New-Item `
-                -ItemType Directory `
-                -Path "${env:WEBSITE_PATH}"
+            New-Item -ItemType Directory -Path "${env:WEBSITE_PATH}" | Out-Null
         }
 
     - name: Copy Website Files
       shell: powershell
       run: |
 
-        robocopy `
-            Website `
-            "${env:WEBSITE_PATH}" `
-            /MIR
+        robocopy Website "${env:WEBSITE_PATH}" /MIR
 
-        if ($LASTEXITCODE -ge 8)
+        if($LASTEXITCODE -ge 8)
         {
             exit $LASTEXITCODE
         }
@@ -167,33 +213,33 @@ jobs:
 
         Start-WebSite -Name "${env:WEBSITE_NAME}"
 
-        Write-Host "Website Started"
+        Write-Host "Website started."
 
 ############################################################
-# Stage 4
+# Stage 4 : Smoke Test
 ############################################################
 
   SmokeTest:
 
     name: Stage 4 - Smoke Test
 
-    runs-on: self-hosted
-
     needs: Deploy
+
+    runs-on: self-hosted
 
     steps:
 
-    - name: Verify Deployment
+    - name: Verify Deployment Files
       shell: powershell
       run: |
 
         if(Test-Path "${env:WEBSITE_PATH}\Web.config")
         {
-            Write-Host "✓ Web.config Found"
+            Write-Host "✓ Web.config found."
         }
         else
         {
-            throw "Deployment Failed"
+            throw "Deployment failed. Web.config not found."
         }
 
     - name: Test Website
@@ -207,18 +253,18 @@ jobs:
                 -UseBasicParsing `
                 -TimeoutSec 30
 
-            Write-Host "Status Code :" $response.StatusCode
+            Write-Host "HTTP Status Code: $($response.StatusCode)"
 
             if($response.StatusCode -eq 200)
             {
-                Write-Host "✓ Website is Running Successfully"
+                Write-Host "✓ Website is running successfully."
             }
             else
             {
-                throw "Website returned unexpected status code."
+                throw "Unexpected HTTP status code: $($response.StatusCode)"
             }
         }
         catch
         {
-            throw "Website is not accessible."
+            throw "Website is not accessible. Check IIS bindings and WEBSITE_NAME."
         }
