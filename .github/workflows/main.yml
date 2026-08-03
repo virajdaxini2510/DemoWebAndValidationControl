@@ -10,156 +10,215 @@ env:
   SOLUTION: DemoWebAndValidationControl.sln
   CONFIGURATION: Release
 
+  WEBSITE_NAME: DemoWebAndValidationControl
+  WEBSITE_PATH: C:\MyWebApp
+
+############################################################
+# Stage 1
+############################################################
+
 jobs:
 
-##########################################################
-# Stage 1 - Build
-##########################################################
+  Build:
 
-Build:
+    name: Stage 1 - Build & Publish
 
-  runs-on: windows-latest
+    runs-on: windows-latest
 
-  steps:
+    steps:
 
-  - uses: actions/checkout@v4
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
 
-  - uses: microsoft/setup-msbuild@v2
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
 
-  - uses: NuGet/setup-nuget@v2
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v2
 
-  - name: Restore NuGet Packages
-    run: nuget restore DemoWebAndValidationControl.sln
+    - name: Restore NuGet Packages
+      run: nuget restore "${{ env.SOLUTION }}"
 
-  - name: Build & Publish Website
-    shell: powershell
-    run: |
+    - name: Build and Publish Website
+      shell: powershell
+      run: |
 
-      msbuild DemoWebAndValidationControl.sln `
-        /p:Configuration=Release `
-        /p:DeployOnBuild=true `
-        /p:WebPublishMethod=FileSystem `
-        /p:DeleteExistingFiles=true `
-        /p:publishUrl="${{ github.workspace }}\Published"
+        msbuild "${{ env.SOLUTION }}" `
+          /p:Configuration=${{ env.CONFIGURATION }} `
+          /p:DeployOnBuild=true `
+          /p:WebPublishMethod=FileSystem `
+          /p:DeleteExistingFiles=true `
+          /p:publishUrl="${{ github.workspace }}\Published"
 
-  - name: Show Published Files
-    shell: powershell
-    run: |
-      Get-ChildItem "${{ github.workspace }}\Published" -Recurse
+    - name: Display Published Files
+      shell: powershell
+      run: |
 
-  - name: Upload Published Website
-    uses: actions/upload-artifact@v4
-    with:
-      name: Website
-      path: Published
-##########################################################
-# Stage 2 - Test Artifact
-##########################################################
+        Write-Host "Published Website"
 
-  Verify:
+        Get-ChildItem `
+            "${{ github.workspace }}\Published" `
+            -Recurse
+
+    - name: Upload Website Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Website
+        path: Published
+
+############################################################
+# Stage 2
+############################################################
+
+  Artifact:
+
+    name: Stage 2 - Verify Artifact
+
+    runs-on: windows-latest
 
     needs: Build
 
-    runs-on: windows-latest
-
     steps:
 
     - name: Download Artifact
       uses: actions/download-artifact@v4
       with:
-        name: WebsitePackage
-        path: Published
+        name: Website
+        path: Website
 
-    - name: Verify Artifact Exists
+    - name: Verify Artifact
       shell: powershell
       run: |
-        Get-ChildItem Published -Recurse
 
-##########################################################
-# Stage 3 - Publish
-##########################################################
+        Write-Host "Artifact Downloaded Successfully"
 
-  Publish:
+        Get-ChildItem Website -Recurse
 
-    needs: Verify
+############################################################
+# Stage 3
+############################################################
 
-    runs-on: windows-latest
+  Deploy:
+
+    name: Stage 3 - Deploy to IIS
+
+    runs-on: self-hosted
+
+    needs: Artifact
 
     steps:
 
-    - name: Download Artifact
+    - name: Download Website Artifact
       uses: actions/download-artifact@v4
       with:
-        name: WebsitePackage
-        path: Published
+        name: Website
+        path: Website
 
-    - name: Publish Completed
-      run: echo "Artifact Published Successfully"
+    - name: Stop IIS Website
+      shell: powershell
+      run: |
 
-##########################################################
-# Stage 4 - Deploy
-##########################################################
+        Import-Module WebAdministration
 
-Deploy:
+        if(Get-Website -Name "${env:WEBSITE_NAME}" -ErrorAction SilentlyContinue)
+        {
+            Stop-WebSite -Name "${env:WEBSITE_NAME}"
 
-  needs: Publish
+            Write-Host "Website Stopped"
+        }
 
-  runs-on: self-hosted
+    - name: Clean Existing Website
+      shell: powershell
+      run: |
 
-  env:
-    WEBSITE_NAME: DemoWebAndValidationControl
-    WEBSITE_PATH: C:\MyWebApp
+        if(Test-Path "${env:WEBSITE_PATH}")
+        {
+            Remove-Item `
+                "${env:WEBSITE_PATH}\*" `
+                -Recurse `
+                -Force
+        }
+        else
+        {
+            New-Item `
+                -ItemType Directory `
+                -Path "${env:WEBSITE_PATH}"
+        }
 
-  steps:
+    - name: Copy Website Files
+      shell: powershell
+      run: |
 
-  - name: Download Website
-    uses: actions/download-artifact@v4
-    with:
-      name: Website
-      path: Website
+        robocopy `
+            Website `
+            "${env:WEBSITE_PATH}" `
+            /MIR
 
-  - name: Stop IIS Website
-    shell: powershell
-    run: |
+        if ($LASTEXITCODE -ge 8)
+        {
+            exit $LASTEXITCODE
+        }
 
-      Import-Module WebAdministration
+    - name: Start IIS Website
+      shell: powershell
+      run: |
 
-      if(Get-Website -Name "${env:WEBSITE_NAME}" -ErrorAction SilentlyContinue)
-      {
-          Stop-WebSite -Name "${env:WEBSITE_NAME}"
-      }
+        Import-Module WebAdministration
 
-  - name: Clean Website Folder
-    shell: powershell
-    run: |
+        Start-WebSite -Name "${env:WEBSITE_NAME}"
 
-      if(Test-Path "${env:WEBSITE_PATH}")
-      {
-          Remove-Item "${env:WEBSITE_PATH}\*" -Recurse -Force
-      }
+        Write-Host "Website Started"
 
-  - name: Copy Website Files
-    shell: powershell
-    run: |
+############################################################
+# Stage 4
+############################################################
 
-      Copy-Item `
-        "Website\*" `
-        "${env:WEBSITE_PATH}" `
-        -Recurse `
-        -Force
+  SmokeTest:
 
-  - name: Start IIS Website
-    shell: powershell
-    run: |
+    name: Stage 4 - Smoke Test
 
-      Import-Module WebAdministration
+    runs-on: self-hosted
 
-      Start-WebSite -Name "${env:WEBSITE_NAME}"
+    needs: Deploy
 
-  - name: Verify Deployment
-    shell: powershell
-    run: |
+    steps:
 
-      Write-Host "Website deployed successfully."
+    - name: Verify Deployment
+      shell: powershell
+      run: |
 
-      Get-ChildItem "${env:WEBSITE_PATH}"
+        if(Test-Path "${env:WEBSITE_PATH}\Web.config")
+        {
+            Write-Host "✓ Web.config Found"
+        }
+        else
+        {
+            throw "Deployment Failed"
+        }
+
+    - name: Test Website
+      shell: powershell
+      run: |
+
+        try
+        {
+            $response = Invoke-WebRequest `
+                -Uri "http://localhost" `
+                -UseBasicParsing `
+                -TimeoutSec 30
+
+            Write-Host "Status Code :" $response.StatusCode
+
+            if($response.StatusCode -eq 200)
+            {
+                Write-Host "✓ Website is Running Successfully"
+            }
+            else
+            {
+                throw "Website returned unexpected status code."
+            }
+        }
+        catch
+        {
+            throw "Website is not accessible."
+        }
