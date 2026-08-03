@@ -16,46 +16,42 @@ jobs:
 # Stage 1 - Build
 ##########################################################
 
-  Build:
+Build:
 
-    runs-on: windows-latest
+  runs-on: windows-latest
 
-    steps:
+  steps:
 
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+  - uses: actions/checkout@v4
 
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2
+  - uses: microsoft/setup-msbuild@v2
 
-    - name: Setup NuGet
-      uses: NuGet/setup-nuget@v2
+  - uses: NuGet/setup-nuget@v2
 
-    - name: Restore NuGet Packages
-      run: nuget restore ${{ env.SOLUTION }}
+  - name: Restore NuGet Packages
+    run: nuget restore DemoWebAndValidationControl.sln
 
-    - name: Build Solution
-      shell: powershell
-      run: |
-        msbuild "${{ env.SOLUTION }}" `
-          /p:Configuration=${{ env.CONFIGURATION }} `
-          /p:DeployOnBuild=true `
-          /p:WebPublishMethod=Package `
-          /p:PackageAsSingleFile=true `
-          /p:SkipInvalidConfigurations=true `
-          /p:PackageLocation="${{ github.workspace }}\Published"
+  - name: Build & Publish Website
+    shell: powershell
+    run: |
 
-    - name: Show Published Files
-      shell: powershell
-      run: |
-        Get-ChildItem "${{ github.workspace }}\Published" -Recurse
+      msbuild DemoWebAndValidationControl.sln `
+        /p:Configuration=Release `
+        /p:DeployOnBuild=true `
+        /p:WebPublishMethod=FileSystem `
+        /p:DeleteExistingFiles=true `
+        /p:publishUrl="${{ github.workspace }}\Published"
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: WebsitePackage
-        path: Published
+  - name: Show Published Files
+    shell: powershell
+    run: |
+      Get-ChildItem "${{ github.workspace }}\Published" -Recurse
 
+  - name: Upload Published Website
+    uses: actions/upload-artifact@v4
+    with:
+      name: Website
+      path: Published
 ##########################################################
 # Stage 2 - Test Artifact
 ##########################################################
@@ -104,66 +100,66 @@ jobs:
 # Stage 4 - Deploy
 ##########################################################
 
-  Deploy:
+Deploy:
 
-    needs: Publish
+  needs: Publish
 
-    runs-on: self-hosted
+  runs-on: self-hosted
 
-    env:
-      WEBSITE_NAME: DemoWebAndValidationControl
-      WEBSITE_PATH: C:\inetpub\wwwroot\DemoWebAndValidationControl
+  env:
+    WEBSITE_NAME: DemoWebAndValidationControl
+    WEBSITE_PATH: C:\MyWebApp
 
-    steps:
+  steps:
 
-    - name: Download Artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: WebsitePackage
-        path: Published
+  - name: Download Website
+    uses: actions/download-artifact@v4
+    with:
+      name: Website
+      path: Website
 
-    - name: Stop IIS Website
-      shell: powershell
-      run: |
-        Import-Module WebAdministration
+  - name: Stop IIS Website
+    shell: powershell
+    run: |
 
-        if(Get-Website -Name "${env:WEBSITE_NAME}" -ErrorAction SilentlyContinue)
-        {
-            Stop-WebSite -Name "${env:WEBSITE_NAME}"
-        }
+      Import-Module WebAdministration
 
-    - name: Clean Website Folder
-      shell: powershell
-      run: |
-        if(Test-Path "${env:WEBSITE_PATH}")
-        {
-            Remove-Item "${env:WEBSITE_PATH}\*" -Recurse -Force
-        }
-        else
-        {
-            New-Item -ItemType Directory -Path "${env:WEBSITE_PATH}"
-        }
+      if(Get-Website -Name "${env:WEBSITE_NAME}" -ErrorAction SilentlyContinue)
+      {
+          Stop-WebSite -Name "${env:WEBSITE_NAME}"
+      }
 
-    - name: Extract Web Package
-      shell: powershell
-      run: |
+  - name: Clean Website Folder
+    shell: powershell
+    run: |
 
-        $zip = Get-ChildItem Published -Recurse -Filter *.zip | Select-Object -First 1
+      if(Test-Path "${env:WEBSITE_PATH}")
+      {
+          Remove-Item "${env:WEBSITE_PATH}\*" -Recurse -Force
+      }
 
-        Write-Host "Deploying package:"
-        Write-Host $zip.FullName
+  - name: Copy Website Files
+    shell: powershell
+    run: |
 
-        Expand-Archive `
-            -Path $zip.FullName `
-            -DestinationPath "${env:WEBSITE_PATH}" `
-            -Force
+      Copy-Item `
+        "Website\*" `
+        "${env:WEBSITE_PATH}" `
+        -Recurse `
+        -Force
 
-    - name: Start IIS Website
-      shell: powershell
-      run: |
-        Import-Module WebAdministration
+  - name: Start IIS Website
+    shell: powershell
+    run: |
 
-        Start-WebSite -Name "${env:WEBSITE_NAME}"
+      Import-Module WebAdministration
 
-    - name: Deployment Completed
-      run: echo "Application deployed successfully."
+      Start-WebSite -Name "${env:WEBSITE_NAME}"
+
+  - name: Verify Deployment
+    shell: powershell
+    run: |
+
+      Write-Host "Website deployed successfully."
+
+      Get-ChildItem "${env:WEBSITE_PATH}"
