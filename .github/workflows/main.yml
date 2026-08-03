@@ -148,7 +148,6 @@ jobs:
         Write-Host "===== ARTIFACT CONTENT ====="
 
         Get-ChildItem Website -Recurse
-
 ############################################################
 # Stage 3 : Deploy to IIS
 ############################################################
@@ -163,11 +162,35 @@ jobs:
 
     steps:
 
+    #-------------------------------------------------------
+    # Download Artifact
+    #-------------------------------------------------------
+
     - name: Download Website Artifact
       uses: actions/download-artifact@v4
       with:
         name: Website
         path: Website
+
+    #-------------------------------------------------------
+    # Verify Artifact
+    #-------------------------------------------------------
+
+    - name: Verify Downloaded Artifact
+      shell: powershell
+      run: |
+
+        if (!(Test-Path "Website"))
+        {
+            throw "Website artifact was not downloaded."
+        }
+
+        Write-Host "===== WEBSITE ARTIFACT ====="
+        Get-ChildItem Website -Recurse
+
+    #-------------------------------------------------------
+    # Stop IIS Website
+    #-------------------------------------------------------
 
     - name: Stop IIS Website
       shell: powershell
@@ -175,35 +198,79 @@ jobs:
 
         Import-Module WebAdministration
 
-        if(Get-Website -Name "${env:WEBSITE_NAME}" -ErrorAction SilentlyContinue)
+        $site = Get-Website -Name "${env:WEBSITE_NAME}" -ErrorAction SilentlyContinue
+
+        if ($null -eq $site)
         {
-            Stop-WebSite -Name "${env:WEBSITE_NAME}"
-            Write-Host "Website stopped."
+            throw "IIS Website '${env:WEBSITE_NAME}' does not exist."
         }
 
-    - name: Clean IIS Folder
-      shell: powershell
-      run: |
-
-        if(Test-Path "${env:WEBSITE_PATH}")
+        if ($site.State -eq "Started")
         {
-            Remove-Item "${env:WEBSITE_PATH}\*" -Recurse -Force
+            Stop-WebSite -Name "${env:WEBSITE_NAME}"
+            Write-Host "Website stopped successfully."
         }
         else
         {
-            New-Item -ItemType Directory -Path "${env:WEBSITE_PATH}" | Out-Null
+            Write-Host "Website is already stopped."
         }
 
-    - name: Copy Website Files
+    #-------------------------------------------------------
+    # Prepare IIS Folder
+    #-------------------------------------------------------
+
+    - name: Prepare IIS Folder
+      shell: powershell
+      run: |
+
+        if (!(Test-Path "${env:WEBSITE_PATH}"))
+        {
+            New-Item `
+                -ItemType Directory `
+                -Path "${env:WEBSITE_PATH}" `
+                -Force | Out-Null
+
+            Write-Host "Created IIS Folder."
+        }
+
+        Remove-Item `
+            "${env:WEBSITE_PATH}\*" `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+        Write-Host "Old website files removed."
+
+    #-------------------------------------------------------
+    # Deploy Website
+    #-------------------------------------------------------
+
+    - name: Deploy Website Files
       shell: powershell
       run: |
 
         robocopy Website "${env:WEBSITE_PATH}" /MIR
 
-        if($LASTEXITCODE -ge 8)
+        $exitCode = $LASTEXITCODE
+
+        Write-Host ""
+        Write-Host "======================================"
+        Write-Host "Robocopy Exit Code : $exitCode"
+        Write-Host "======================================"
+
+        if ($exitCode -lt 8)
         {
-            exit $LASTEXITCODE
+            Write-Host "Deployment completed successfully."
+            exit 0
         }
+        else
+        {
+            throw "Robocopy failed with exit code $exitCode"
+        }
+
+    #-------------------------------------------------------
+    # Start IIS Website
+    #-------------------------------------------------------
 
     - name: Start IIS Website
       shell: powershell
@@ -213,7 +280,25 @@ jobs:
 
         Start-WebSite -Name "${env:WEBSITE_NAME}"
 
-        Write-Host "Website started."
+        Write-Host "Website started successfully."
+
+    #-------------------------------------------------------
+    # Deployment Summary
+    #-------------------------------------------------------
+
+    - name: Show Deployment Summary
+      shell: powershell
+      run: |
+
+        Write-Host ""
+        Write-Host "==========================================="
+        Write-Host "Deployment Summary"
+        Write-Host "==========================================="
+        Write-Host "Website Name : ${env:WEBSITE_NAME}"
+        Write-Host "Physical Path: ${env:WEBSITE_PATH}"
+        Write-Host ""
+
+        Get-ChildItem "${env:WEBSITE_PATH}" -Recurse
 
 ############################################################
 # Stage 4 : Smoke Test
