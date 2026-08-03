@@ -9,7 +9,7 @@
 <body>
     <form id="form1" runat="server">
 
-        <h2>Student Registration Module</h2>
+        <h2>Student Registration Module 1.0.0.1</h2>
 
         <asp:Image
             ID="imgLogo"
