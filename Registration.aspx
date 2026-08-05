@@ -9,38 +9,33 @@
 <body>
     <form id="form1" runat="server">
 
-        <h2>Student Registration Module 1.0.0.2</h2>
+        <h2>Student Registration Module 1.0.0.0</h2>
 
         <asp:Image
             ID="imgLogo"
             runat="server"
             ImageUrl="~/Images/Mu_LOGO.png"
             Width="360px" />
-
         <br />
         <br />
-
         <asp:Literal
             ID="litTitle"
             runat="server"
             Text="<b>Fill all details carefully.</b><br/><br/>">
-</asp:Literal>
+        </asp:Literal>
 
         <asp:Panel ID="Panel1" runat="server">
 
             <table border="1">
-
                 <tr>
                     <td>
                         <asp:Label ID="lblName" runat="server" Text="Student Name"></asp:Label>
                     </td>
-
                     <td>
-
                         <asp:TextBox
                             ID="txtName"
                             runat="server">
-</asp:TextBox>
+                        </asp:TextBox>
 
                         <asp:RequiredFieldValidator
                             ID="rfvName"
@@ -49,21 +44,17 @@
                             ErrorMessage="Name Required"
                             Display="Dynamic"
                             ForeColor="Red">
-</asp:RequiredFieldValidator>
-
+                        </asp:RequiredFieldValidator>
                     </td>
                 </tr>
 
                 <tr>
-
                     <td>Age</td>
-
                     <td>
-
                         <asp:TextBox
                             ID="txtAge"
                             runat="server">
-</asp:TextBox>
+                        </asp:TextBox>
 
                         <asp:RequiredFieldValidator
                             ID="rfvAge"
