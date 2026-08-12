@@ -4,12 +4,12 @@
 
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head runat="server">
-    <title>Student Registration 5EC1</title>
+    <title>Student Registration 5EV4</title>
 </head>
 <body>
     <form id="form1" runat="server">
 
-        <h2>Student Registration Module 1.0.1.3 - Changes for 5EC1 Class</h2>
+        <h2>Student Registration Module 1.0.1.4 - Changes for 5EV4 Class</h2>
 
         <asp:Image
             ID="imgLogo"
